@@ -41,6 +41,8 @@ const byte TxAddress[5] = "00001";
 
 NRF24L01 chip can send or receive 32 bytes of data at once. Under the hood it accepts the byte array which you want to send. But for easier communication we've built structs for sending telemetry data and commands (under the hood, struct will be converted to bytes and then on receiver side, these bytes will be translated to struct).
 
+## Receiving Data
+
 ### sensor_packet_t
 
 We have struct called sensor_packet_t which will be packed to bytes and sent to ground station.
@@ -64,20 +66,20 @@ typedef struct __attribute__((packed)) {
 
 ??? info "packet_type"
     "packet_type" is related to the type of sensor data type.
+    
+    Packet types described as enum:
 
-Packet types described as enum:
-
-``` cpp
-typedef enum{
-    RF_ACCELERATION = 0,
-    RF_GYROSCOPE,
-    RF_ORIENTATION,
-    RF_QUATERNION,
-    RF_BAROMETER,
-    RF_GPS,
-    RF_VERTICAL_VELOCITY,
-} rf_packet_type_t;
-```
+    ``` cpp
+    typedef enum{
+        RF_ACCELERATION = 0,
+        RF_GYROSCOPE,
+        RF_ORIENTATION,
+        RF_QUATERNION,
+        RF_BAROMETER,
+        RF_GPS,
+        RF_VERTICAL_VELOCITY,
+    } rf_packet_type_t;
+    ```
 
 #### timestamp
 
@@ -92,3 +94,32 @@ typedef enum{
 ### Received Data Handling
 
 So, when ground station will handle received data it will take the first byte, check if it's sensor data type, if yes -> check packet_type and convert "data" bytes to actual sensor struct. And then, you can display this data on the display or send data via serial to the application on a laptop.
+
+## Sending Data
+
+As we assume, that user will send only commands (open close shutes, launch rocket, start logging, etc.) from ground station to flight controller, we've build this communication based on commands. 
+
+### colirone_payload_cmd_t
+
+"colirone_payload_cmd_t" struct has fields, which are actually "flags" what flight controller should to do. And in flight controller you should add handling to these commands (for example your parachute can be ignited by charge or released by servo).
+
+??? info "colirone_payload_cmd_t"
+    ``` cpp
+    typedef struct __attribute__((packed)) {
+        uint8_t lighter_launch_number;
+        uint8_t close_shutes;
+        uint8_t open_shutes;
+        uint8_t start_logs;
+        uint8_t write_logs;
+        uint8_t reset_altitude;
+        uint8_t remove_logs;
+    } colirone_payload_cmd_t;
+    ```
+
+For example, you want to send "open_shutes" command. (this event can be triggered by button or received command from serial port). You need only to add this command to the queue and it will be sent during next switch to TX role.
+
+``` cpp
+colirone_payload_cmd_t colirone_payload_cmd = {0};
+colirone_payload_cmd.open_shutes = 1;
+enqueue_cmd(colirone_payload_cmd);
+```
