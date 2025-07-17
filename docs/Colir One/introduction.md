@@ -1,4 +1,4 @@
-# Getting Started
+# Introduction
 
 Colir One is the flight controller which has built in:
 
@@ -14,7 +14,3 @@ Colir One is the flight controller which has built in:
 * Debug interface to debug your code
 
 To use flight controller you will also need Ground Station, which will receive telemetry data from flight controller and will display some data on built-in screen and output all the data via USB Serial interface.
-
-``` cpp
-int a = 115;
-```
