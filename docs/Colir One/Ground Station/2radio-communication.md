@@ -1,6 +1,6 @@
 # Radio Communication
 
-Radio communication between ground station and flight controler is based on NRF24L01 chip.
+Radio communication between ground station and flight controler is based on nRF24L01 chip.
 This chip is a transceiver, which means that it can send and receive data, but it can do only ONE ROLE at the time. It means that it can be either in send OR receive mode. Which means, that in order to be able to send and receive data to and from flight controller we need to switch roles (for example when flight controller sends data, ground station is in receiver mode, then they switch roles and ground station will send command to flight controller, then they again switch roles again and again and again...)
 
 ## Configuration
@@ -37,15 +37,55 @@ const byte RxAddress[5] = "00002";
 const byte TxAddress[5] = "00001";
 ```
 
+## Switching TX/RX modes
+
+As it was mentioned before, nRF24L01 chip cannot receive and transmit data at once, it needs to be eaither in RX or in TX mode. In order to solve this, ground station is always in RX mode, but flight controller can send specific command to ground station, which will tell ground station to switch to TX mode, which will tell ground station, that flight controller is switched to RX mode and started listening to commands from ground station. This intervals can be configured on flight controller side. And if ground station has command to send, it sends it to flight controller and switches to RX mode back and flight controller switches to TX mode, to continue sending the telemetry data.
+
+When you use our code for ground station, to switch to TX role and send command, you can use transmit_cmd function:
+
+``` cpp
+void transmit_cmd(colirone_payload_cmd_t colirone_payload_cmd)
+```
+
+It will stop listening (switch to TX mode), send the command and will start listening (switch to RX mode).
+
 ## Communication Data
 
-NRF24L01 chip can send or receive 32 bytes of data at once. Under the hood it accepts the byte array which you want to send. But for easier communication we've built structs for sending telemetry data and commands (under the hood, struct will be converted to bytes and then on receiver side, these bytes will be translated to struct).
+nRF24L01 chip can send or receive 32 bytes of data at once. Under the hood it accepts the byte array which you want to send. But for easier communication we've built structs for sending telemetry data and commands (under the hood, struct will be converted to bytes and then on receiver side, these bytes will be translated to struct).
 
 ## Receiving Data
 
+When nRF24L01 chip is in RX mode, it will "listen" for incoming data on RxAddress and when there is some data radio.available() will return "true". Then you need to read data from chip to your local buffer:
+
+``` cpp
+if(adio.available())
+    radio.read(buffer, sizeof(buffer));
+```
+
+And then you can convert this buffer to your data. In our code we use the first byte to indicate what kind of data was sent (is it data from sensors or "switch to TX mode" command).
+
+``` cpp
+uint8_t packet_type = buffer[0];
+switch (packet_type) {
+    case 1: {
+        // handle switch to TX mode command and send command to flight controller
+        break;
+    }
+    case 0: {
+        //handle received sensor data
+        sensor_packet_t sensor_packet;
+        memcpy(&sensor_packet, buffer, sizeof(sensor_packet_t));
+        break;
+    }
+    default:
+        Serial.println("Unknown packet type received.");
+        break;
+}
+```
+
 ### sensor_packet_t
 
-We have struct called sensor_packet_t which will be packed to bytes and sent to ground station.
+In order to send telemetry data, we have struct called sensor_packet_t which will be packed to bytes and sent to ground station.
 It looks like this:
 
 ``` cpp
@@ -53,7 +93,7 @@ typedef struct __attribute__((packed)) {
     uint8_t type;
     uint8_t packet_type;      
     uint32_t timestamp;
-    uint8_t data[26]; // 32 - 1 - 5 = 26
+    uint8_t data[26]; // 32 - 1 - 1 - 4 = 26
 } sensor_packet_t;
 ```
 
