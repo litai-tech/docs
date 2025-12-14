@@ -6,6 +6,8 @@ theme:
   name: material
   palette:
     scheme: slate
+  features:
+    - content.code.copy
 
 markdown_extensions:
   - def_list
@@ -17,6 +19,7 @@ markdown_extensions:
   - pymdownx.snippets
   - pymdownx.superfences
   - admonition
+  - pymdownx.critic
   - pymdownx.details
   - pymdownx.tabbed:
       alternate_style: true

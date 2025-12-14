@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>UI Grid Configurator</title>
+  <link href="https://cdn.jsdelivr.net/npm/daisyui@4.4.19/dist/full.min.css" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://cdn.jsdelivr.net/npm/daisyui@5/themes.css" rel="stylesheet" type="text/css" />
+  
+  <link href="prism.css" rel="stylesheet" />
+  <style>
+    .cell-container {
+      position: relative;
+      min-height: 96px;
+      cursor: pointer;
+    }
+
+    .cell-selected {
+      border-color: #570df8 !important;
+      background-color: rgba(87, 13, 248, 0.1);
+    }
+
+    .component-item {
+      position: relative;
+    }
+
+    .component-item:hover .remove-btn {
+      opacity: 1;
+    }
+
+    .remove-btn {
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+
+    .dropdown-content {
+      display: none;
+      position: absolute;
+      z-index: 10;
+    }
+
+    .dropdown.active .dropdown-content {
+      display: block;
+      visibility: visible;
+      opacity: 1;
+    }
+  </style>
+</head>
+
+<body class="bg-base-100">
+  <div class="min-h-screen p-8">
+    <div class="navbar bg-base-100 shadow-sm justify-end">
+      <div class="navbar-end">
+        <a disabled class="btn btn-ghost text-xl">UI Configurator</a>
+        <a class="btn btn-ghost text-xl">GPIO Configurator</a>
+      </div>
+    </div>
+    <div class="max-w-7xl mt-8 mx-auto">
+      <h1 class="text-3xl font-bold mb-6">UI Grid Configurator</h1>
+
+      <!-- Controls -->
+      <div class="bg-base-200 p-6 rounded-lg shadow-lg mb-6">
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+          <div class="form-control">
+            <label class="label">
+              <span class="label-text">Rows</span>
+            </label>
+            <input type="number" id="rows-input" value="3" min="1" class="input input-bordered" />
+          </div>
+
+          <div class="form-control">
+            <label class="label">
+              <span class="label-text">Columns</span>
+            </label>
+            <input type="number" id="cols-input" value="3" min="1" class="input input-bordered" />
+          </div>
+
+          <div class="form-control">
+            <label class="label">
+              <span class="label-text">Actions</span>
+            </label>
+            <button id="merge-horizontal-btn" class="btn btn-info">
+              Merge Horizontal
+            </button>
+          </div>
+
+          <div class="form-control">
+            <label class="label">
+              <span class="label-text">&nbsp;</span>
+            </label>
+            <button id="merge-vertical-btn" class="btn btn-info">
+              Merge Vertical
+            </button>
+          </div>
+        </div>
+
+        <div class="text-sm text-base-content/60" id="selection-info">
+          Selected cells: 0 | Click cells to select, then merge or add components
+        </div>
+      </div>
+
+      <!-- Preview -->
+      <div class="bg-base-200 p-6 rounded-lg shadow-lg mb-6">
+        <h2 class="text-xl font-bold mb-4">Live Preview</h2>
+        <div id="grid-preview" class="grid gap-4 border-2 border-dashed border-base-300 p-4"></div>
+      </div>
+
+      <!-- Generated Code -->
+      <div class="bg-base-200 p-6 rounded-lg shadow-lg">
+        <h2 class="text-xl font-bold mb-4">Generated Code</h2>
+        <fieldset class="fieldset bg-base-200 border-base-300 w-1/4 rounded-box border p-4">
+          <label class="label">
+            <input type="checkbox" id="generate-borders" checked="checked" class="toggle toggle-accent" />
+            Generate cell borders
+          </label>
+        </fieldset>
+        <div class="mockup-code">
+          <pre><code class="language-html" id="generated-code"></code></pre>
+        </div>
+        <button id="copy-code-btn" class="btn btn-primary mt-4">
+          Copy Code
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // State
+    let state = {
+      rows: 3,
+      cols: 3,
+      cells: {},
+      selectedCells: [],
+      openDropdown: null
+    };
+
+    // Initialize
+    function init() {
+      initializeGrid();
+      render();
+      attachEventListeners();
+    }
+
+    function initializeGrid() {
+      const newCells = {};
+      for (let i = 0; i < state.rows; i++) {
+        for (let j = 0; j < state.cols; j++) {
+          const key = `${i}-${j}`;
+          if (!state.cells[key] || state.cells[key].hidden) {
+            newCells[key] = {
+              rowSpan: 1,
+              colSpan: 1,
+              components: [],
+              hidden: false
+            };
+          } else {
+            newCells[key] = state.cells[key];
+          }
+        }
+      }
+      state.cells = newCells;
+    }
+
+    function attachEventListeners() {
+      document.getElementById('rows-input').addEventListener('input', (e) => {
+        state.rows = Math.max(1, parseInt(e.target.value) || 1);
+        initializeGrid();
+        render();
+      });
+
+      document.getElementById('cols-input').addEventListener('input', (e) => {
+        state.cols = Math.max(1, parseInt(e.target.value) || 1);
+        initializeGrid();
+        render();
+      });
+
+      document.getElementById('merge-horizontal-btn').addEventListener('click', mergeCellsHorizontally);
+      document.getElementById('merge-vertical-btn').addEventListener('click', mergeCellsVertically);
+      document.getElementById('copy-code-btn').addEventListener('click', copyCode);
+
+      // Close dropdowns when clicking outside
+      document.addEventListener('click', (e) => {
+        if (!e.target.closest('.dropdown')) {
+          state.openDropdown = null;
+          render();
+        }
+      });
+    }
+
+    function toggleCellSelection(row, col) {
+      const key = `${row}-${col}`;
+      const index = state.selectedCells.indexOf(key);
+
+      if (index > -1) {
+        state.selectedCells.splice(index, 1);
+      } else {
+        state.selectedCells.push(key);
+      }
+
+      render();
+    }
+
+    function mergeCellsHorizontally() {
+      if (state.selectedCells.length < 2) return;
+
+      const cellCoords = state.selectedCells.map(key => {
+        const [r, c] = key.split('-').map(Number);
+        return { r, c, key };
+      });
+
+      const row = cellCoords[0].r;
+      if (!cellCoords.every(cell => cell.r === row)) {
+        alert('Please select cells in the same row to merge horizontally');
+        return;
+      }
+
+      cellCoords.sort((a, b) => a.c - b.c);
+
+      for (let i = 1; i < cellCoords.length; i++) {
+        if (cellCoords[i].c !== cellCoords[i - 1].c + 1) {
+          alert('Please select consecutive cells');
+          return;
+        }
+      }
+
+      const firstKey = cellCoords[0].key;
+      const mergedComponents = cellCoords.flatMap(cell =>
+        state.cells[cell.key]?.components || []
+      );
+
+      state.cells[firstKey] = {
+        ...state.cells[firstKey],
+        colSpan: cellCoords.length,
+        components: mergedComponents
+      };
+
+      for (let i = 1; i < cellCoords.length; i++) {
+        state.cells[cellCoords[i].key] = {
+          ...state.cells[cellCoords[i].key],
+          hidden: true
+        };
+      }
+
+      state.selectedCells = [];
+      render();
+    }
+
+    function mergeCellsVertically() {
+      if (state.selectedCells.length < 2) return;
+
+      const cellCoords = state.selectedCells.map(key => {
+        const [r, c] = key.split('-').map(Number);
+        return { r, c, key };
+      });
+
+      const col = cellCoords[0].c;
+      if (!cellCoords.every(cell => cell.c === col)) {
+        alert('Please select cells in the same column to merge vertically');
+        return;
+      }
+
+      cellCoords.sort((a, b) => a.r - b.r);
+
+      for (let i = 1; i < cellCoords.length; i++) {
+        if (cellCoords[i].r !== cellCoords[i - 1].r + 1) {
+          alert('Please select consecutive cells');
+          return;
+        }
+      }
+
+      const firstKey = cellCoords[0].key;
+      const mergedComponents = cellCoords.flatMap(cell =>
+        state.cells[cell.key]?.components || []
+      );
+
+      state.cells[firstKey] = {
+        ...state.cells[firstKey],
+        rowSpan: cellCoords.length,
+        components: mergedComponents
+      };
+
+      for (let i = 1; i < cellCoords.length; i++) {
+        state.cells[cellCoords[i].key] = {
+          ...state.cells[cellCoords[i].key],
+          hidden: true
+        };
+      }
+
+      state.selectedCells = [];
+      render();
+    }
+
+    function splitCell(row, col) {
+      const key = `${row}-${col}`;
+      const cell = state.cells[key];
+
+      if (!cell || cell.colSpan < 2) {
+        alert('Cell must have colSpan >= 2 to split');
+        return;
+      }
+
+      state.cells[key] = {
+        ...cell,
+        colSpan: cell.colSpan - 1
+      };
+
+      const nextCol = col + cell.colSpan - 1;
+      const nextKey = `${row}-${nextCol}`;
+      state.cells[nextKey] = {
+        rowSpan: 1,
+        colSpan: 1,
+        components: [],
+        hidden: false
+      };
+
+      render();
+    }
+
+    function addComponent(row, col, type) {
+      const key = `${row}-${col}`;
+
+      if (!state.cells[key]) {
+        state.cells[key] = { rowSpan: 1, colSpan: 1, components: [], hidden: false };
+      }
+
+      const componentId = Date.now();
+      state.cells[key].components.push({
+        id: componentId,
+        type,
+        value: type === 'text' ? 'Sample Text' : ''
+      });
+
+      state.openDropdown = null;
+      render();
+    }
+
+    function removeComponent(row, col, componentId) {
+      const key = `${row}-${col}`;
+
+      if (state.cells[key]) {
+        state.cells[key].components = state.cells[key].components.filter(
+          c => c.id !== componentId
+        );
+        render();
+      }
+    }
+
+    function toggleDropdown(key, event) {
+      event.stopPropagation();
+      state.openDropdown = state.openDropdown === key ? null : key;
+      render();
+    }
+
+    function renderComponent(component) {
+      switch (component.type) {
+        case 'button':
+          return '<button class="btn btn-primary btn-sm mr-2 mb-2">Button</button>';
+        case 'dropdown':
+          return '<select class="select select-bordered select-sm w-full mb-2"><option>Option 1</option><option>Option 2</option></select>';
+        case 'text':
+          return `<p class="mb-2">${component.value}</p>`;
+        case 'input':
+          return '<input type="text" class="input input-bordered input-sm w-full mb-2" placeholder="Text input" />';
+        default:
+          return '';
+      }
+    }
+
+    function render() {
+      // Update selection info
+      document.getElementById('selection-info').textContent =
+        `Selected cells: ${state.selectedCells.length} | Click cells to select, then merge or add components`;
+
+      // Render grid
+      const gridPreview = document.getElementById('grid-preview');
+      gridPreview.style.gridTemplateColumns = `repeat(${state.cols}, 1fr)`;
+      gridPreview.innerHTML = '';
+
+      for (let i = 0; i < state.rows; i++) {
+        for (let j = 0; j < state.cols; j++) {
+          const key = `${i}-${j}`;
+          const cell = state.cells[key] || { rowSpan: 1, colSpan: 1, components: [], hidden: false };
+
+          if (cell.hidden) continue;
+
+          const isSelected = state.selectedCells.includes(key);
+          const cellDiv = document.createElement('div');
+          cellDiv.className = `cell-container border-2 p-4 rounded ${isSelected ? 'border-success' : 'border-gray-500 hover:border-base-400'
+            }`;
+
+          if (cell.colSpan > 1) cellDiv.style.gridColumn = `span ${cell.colSpan}`;
+          if (cell.rowSpan > 1) cellDiv.style.gridRow = `span ${cell.rowSpan}`;
+
+          cellDiv.onclick = () => toggleCellSelection(i, j);
+
+          // Top right controls
+          const controls = document.createElement('div');
+          controls.className = 'absolute top-2 right-2 flex gap-1';
+
+          if (cell.colSpan > 1) {
+            const splitBtn = document.createElement('button');
+            splitBtn.className = 'btn btn-xs btn-warning';
+            splitBtn.textContent = 'Split';
+            splitBtn.onclick = (e) => {
+              e.stopPropagation();
+              splitCell(i, j);
+            };
+            controls.appendChild(splitBtn);
+          }
+
+          const dropdown = document.createElement('div');
+          dropdown.className = `dropdown dropdown-end ${state.openDropdown === key ? 'active' : ''}`;
+
+          const dropdownBtn = document.createElement('button');
+          dropdownBtn.className = 'btn btn-xs btn-circle btn-primary';
+          dropdownBtn.textContent = '+';
+          dropdown.onclick = (e) => toggleDropdown(key, e);
+
+          const dropdownContent = document.createElement('ul');
+          dropdownContent.className = 'dropdown-content menu p-2 shadow bg-base-100 rounded-box w-52';
+          dropdownContent.innerHTML = `
+            <li><a data-type="button">Button</a></li>
+            <li><a data-type="dropdown">Dropdown</a></li>
+            <li><a data-type="text">Plain Text</a></li>
+            <li><a data-type="input">Text Input</a></li>
+          `;
+
+          dropdownContent.querySelectorAll('a').forEach(link => {
+            link.onclick = (e) => {
+              e.stopPropagation();
+              addComponent(i, j, e.target.dataset.type);
+            };
+          });
+
+          dropdown.appendChild(dropdownBtn);
+          dropdown.appendChild(dropdownContent);
+          controls.appendChild(dropdown);
+          cellDiv.appendChild(controls);
+
+          // Components
+          const componentsDiv = document.createElement('div');
+          componentsDiv.className = 'mt-8';
+          componentsDiv.onclick = (e) => e.stopPropagation();
+
+          cell.components.forEach(comp => {
+            const compWrapper = document.createElement('div');
+            compWrapper.className = 'component-item relative group';
+            compWrapper.innerHTML = renderComponent(comp);
+
+            const removeBtn = document.createElement('button');
+            removeBtn.className = 'remove-btn absolute -top-1 -right-1 btn btn-xs btn-circle btn-error';
+            removeBtn.textContent = '×';
+            removeBtn.onclick = () => removeComponent(i, j, comp.id);
+
+            compWrapper.appendChild(removeBtn);
+            componentsDiv.appendChild(compWrapper);
+          });
+
+          cellDiv.appendChild(componentsDiv);
+
+          // Cell info
+          const infoDiv = document.createElement('div');
+          infoDiv.className = 'absolute bottom-2 left-2 text-xs text-base-content/40';
+          infoDiv.textContent = `${i},${j}${cell.colSpan > 1 ? ` (col:${cell.colSpan})` : ''}${cell.rowSpan > 1 ? ` (row:${cell.rowSpan})` : ''}`;
+          cellDiv.appendChild(infoDiv);
+
+          gridPreview.appendChild(cellDiv);
+        }
+      }
+
+      // Update generated code
+      const generatedCodeBlock = document.getElementById('generated-code');
+      generatedCodeBlock.textContent = generateCode();
+      
+      if(window.Prism)
+        window.Prism.highlightAll();
+    }
+
+    function generateCode() {
+      const generateBorders = document.getElementById('generate-borders').checked;
+
+      let code = `\n<div class="grid gap-4" style="grid-template-columns: repeat(${state.cols}, 1fr);">\n`;
+
+      for (let i = 0; i < state.rows; i++) {
+        for (let j = 0; j < state.cols; j++) {
+          const key = `${i}-${j}`;
+          const cell = state.cells[key] || { rowSpan: 1, colSpan: 1, components: [], hidden: false };
+
+          if (cell.hidden) continue;
+
+          const style = [];
+          if (cell.colSpan > 1) style.push(`grid-column: span ${cell.colSpan}`);
+          if (cell.rowSpan > 1) style.push(`grid-row: span ${cell.rowSpan}`);
+
+          const styleAttr = style.length > 0 ? ` style="${style.join('; ')}"` : '';
+          const classAttr = generateBorders ? ' class="border border-gray-300 p-4"' : '';
+          code += `  <div id='cell-${key}'${classAttr}${styleAttr}>\n`;
+
+          cell.components.forEach(comp => {
+            switch (comp.type) {
+              case 'button':
+                code += `    <button class="btn btn-primary">Button</button>\n`;
+                break;
+              case 'dropdown':
+                code += `    <select class="select select-bordered w-full">\n`;
+                code += `      <option>Option 1</option>\n`;
+                code += `      <option>Option 2</option>\n`;
+                code += `    </select>\n`;
+                break;
+              case 'text':
+                code += `    <p>${comp.value}</p>\n`;
+                break;
+              case 'input':
+                code += `    <input type="text" class="input input-bordered w-full" />\n`;
+                break;
+            }
+          });
+
+          code += `  </div>\n`;
+        }
+      }
+
+      code += `</div>`;
+      return code;
+    }
+
+    function copyCode() {
+      const code = generateCode();
+      navigator.clipboard.writeText(code).then(() => {
+        alert('Code copied to clipboard!');
+      });
+    }
+
+    // Start the app
+    init();
+  </script>
+  <script src="prism.js"></script>
+</body>
+
+</html>
